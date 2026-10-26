@@ -29,25 +29,28 @@ for key, default in {
 
 with st.sidebar:
     st.header("Crawl settings")
-    start_url = st.text_input("Start URL", value="https://fiberu.org/basic/LP1.html")
-    contact = st.text_input(
-        "Operator contact",
-        placeholder="you@example.com or https://example.com/contact",
-        help="Included in the crawler User-Agent so site operators can identify the source.",
-    )
-    max_pages = st.slider("Maximum HTML pages", 1, 500, 25)
-    max_depth = st.slider("Maximum link depth", 0, 8, 5)
-    same_domain_only = st.checkbox("Stay on the exact host", value=True)
-    include_assets = st.checkbox("Download page assets and documents", value=True)
-    min_delay = st.slider("Minimum delay per host (seconds)", 0.5, 2.0, 0.75, 0.25)
-    with st.expander("Advanced limits"):
-        concurrency = st.slider("Maximum concurrent requests", 1, 10, 5)
-        time_budget = st.slider("Time limit (seconds)", 30, 300, 240, 30)
-        verify_tls = st.checkbox("Verify TLS certificates", value=True)
-        if not verify_tls:
-            st.warning("TLS verification is disabled. Use this only for a host you trust.")
+    with st.form("crawl_settings", clear_on_submit=False):
+        start_url = st.text_input("Start URL", value="https://fiberu.org/basic/LP1.html")
+        contact = st.text_input(
+            "Operator contact",
+            placeholder="you@example.com or https://example.com/contact",
+            help="Included in the crawler User-Agent so site operators can identify the source.",
+        )
+        max_pages = st.slider("Maximum HTML pages", 1, 500, 25)
+        max_depth = st.slider("Maximum link depth", 0, 8, 5)
+        same_domain_only = st.checkbox("Stay on the exact host", value=True)
+        include_assets = st.checkbox("Download page assets and documents", value=True)
+        min_delay = st.slider("Minimum delay per host (seconds)", 0.5, 2.0, 0.75, 0.25)
+        with st.expander("Advanced limits"):
+            concurrency = st.slider("Maximum concurrent requests", 1, 10, 5)
+            time_budget = st.slider("Time limit (seconds)", 30, 300, 240, 30)
+            verify_tls = st.checkbox("Verify TLS certificates", value=True)
+            if not verify_tls:
+                st.warning("TLS verification is disabled. Use this only for a host you trust.")
 
-    start_clicked = st.button("Start crawl", type="primary", use_container_width=True)
+        start_clicked = st.form_submit_button(
+            "Start crawl", type="primary", use_container_width=True
+        )
     if st.button("Stop crawl", use_container_width=True):
         st.session_state.stop_flag = True
 
