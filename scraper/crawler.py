@@ -101,7 +101,13 @@ class Crawler:
     ) -> CrawlResult:
         await validate_public_url(self.seed)
         self._started = time.monotonic()
-        queue: deque[tuple[str, int, str]] = deque([(self.seed, 0, classify_url(self.seed))])
+        page_queue: deque[tuple[str, int, str]] = deque()
+        resource_queue: deque[tuple[str, int, str]] = deque()
+        seed_item = (self.seed, 0, classify_url(self.seed))
+        if seed_item[2] == "page":
+            page_queue.append(seed_item)
+        else:
+            resource_queue.append(seed_item)
         seen = {self.seed}
         transport = httpx.AsyncHTTPTransport(retries=0, verify=self.config.verify_tls)
         headers = {
@@ -118,7 +124,7 @@ class Crawler:
             http2=True,
             transport=transport,
         ) as client:
-            while queue:
+            while page_queue or resource_queue:
                 if stop_cb and stop_cb():
                     self.result.stopped_reason = "Stopped by the user."
                     break
@@ -127,16 +133,19 @@ class Crawler:
                     break
                 if len(self.result.pages) >= self.config.max_pages:
                     self.result.stopped_reason = "The maximum page count was reached."
-                    break
+                    if page_queue:
+                        page_queue.clear()
+                    if not resource_queue:
+                        break
 
                 batch: list[tuple[str, int, str]] = []
-                while queue and len(batch) < min(self.config.concurrency, 10):
-                    candidate = queue.popleft()
-                    if candidate[2] == "page" and len(self.result.pages) + sum(
-                        item[2] == "page" for item in batch
-                    ) >= self.config.max_pages:
-                        continue
-                    batch.append(candidate)
+                batch_limit = min(self.config.concurrency, 10)
+                while resource_queue and len(batch) < batch_limit:
+                    batch.append(resource_queue.popleft())
+                page_capacity = self.config.max_pages - len(self.result.pages)
+                while page_queue and len(batch) < batch_limit and page_capacity > 0:
+                    batch.append(page_queue.popleft())
+                    page_capacity -= 1
 
                 fetched_batch = await asyncio.gather(
                     *(self._fetch_resource(client, *item) for item in batch),
@@ -154,7 +163,8 @@ class Crawler:
                     if final_url not in self.result.resources:
                         if self.result.total_bytes + len(resource.content) > self.config.max_total_bytes:
                             self.result.stopped_reason = "The 200 MB crawl byte limit was reached."
-                            queue.clear()
+                            page_queue.clear()
+                            resource_queue.clear()
                             break
                         self.result.resources[final_url] = resource
 
@@ -170,7 +180,11 @@ class Crawler:
                             self.result.skipped.append({"url": link, "reason": "Maximum depth exceeded"})
                             continue
                         seen.add(link)
-                        queue.append((link, depth + 1 if kind == "page" else depth, kind))
+                        item = (link, depth + 1 if kind == "page" else depth, kind)
+                        if kind == "page":
+                            page_queue.append(item)
+                        else:
+                            resource_queue.append(item)
 
                     if progress_cb:
                         progress_cb(
@@ -180,7 +194,7 @@ class Crawler:
                                 "assets": len(self.result.assets),
                                 "documents": len(self.result.documents),
                                 "bytes": self.result.total_bytes,
-                                "queued": len(queue),
+                                "queued": len(page_queue) + len(resource_queue),
                             }
                         )
 
