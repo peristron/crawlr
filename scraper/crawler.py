@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from .http_content import DecodedContentTooLargeError, decode_http_content
 from .normalize import canonicalize, classify_url, same_host
 from .parser import decode_html, extract_css_urls, extract_links
 from .security import UnsafeUrlError, validate_public_url
@@ -107,6 +108,7 @@ class Crawler:
             "User-Agent": self.config.user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en",
+            "Accept-Encoding": "identity",
         }
 
         async with httpx.AsyncClient(
@@ -310,18 +312,28 @@ class Crawler:
                             retry_wait = _retry_delay(response, attempt)
                     if retry_wait is None:
                         content = bytearray()
-                        async for chunk in response.aiter_bytes():
+                        async for chunk in response.aiter_raw():
                             content.extend(chunk)
                             if len(content) > self.config.max_resource_bytes:
                                 raise ResourceTooLargeError(
                                     f"Resource exceeds {self.config.max_resource_bytes // (1024 * 1024)} MB"
                                 )
+                        try:
+                            decoded = decode_http_content(
+                                bytes(content),
+                                response.headers.get("content-encoding", ""),
+                                self.config.max_resource_bytes,
+                            )
+                        except DecodedContentTooLargeError as exc:
+                            raise ResourceTooLargeError(str(exc)) from exc
+                        decoded_headers = httpx.Headers(response.headers)
+                        decoded_headers.pop("content-encoding", None)
+                        decoded_headers.pop("content-length", None)
                         return httpx.Response(
                             status_code=response.status_code,
-                            headers=response.headers,
-                            content=bytes(content),
+                            headers=decoded_headers,
+                            content=decoded,
                             request=response.request,
-                            extensions=response.extensions,
                         )
                 if retry_wait is not None:
                     await asyncio.sleep(retry_wait)
